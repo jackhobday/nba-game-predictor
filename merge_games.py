@@ -134,10 +134,6 @@ def create_differential_features(team_row, opp_row):
             team_row['Current_Win_Streak'] - opp_row['Current_Win_Streak']
         )
     
-    # Home/Away advantage
-    if 'Is_Home' in team_row:
-        diffs['Home_Advantage'] = team_row['Is_Home']
-    
     return diffs
 
 
@@ -279,7 +275,6 @@ def merge_season_games(season):
                 'Team_Score': team_row['Tm'],
                 'Opp_Score': team_row.get('Opp.1', team_row.get('Opp', np.nan)),  # Use Opp.1 for score, fallback to Opp
                 'Result': team_row['Result'],  # 1 if Team wins, 0 if Opponent wins
-                'Point_Diff': team_row['Tm'] - team_row.get('Opp.1', team_row.get('Opp', 0)),
                 'OT': 1 if pd.notna(team_row.get('OT')) and str(team_row['OT']).strip() != '' else 0,
             }
             
@@ -347,7 +342,7 @@ def merge_all_seasons():
                    'Team_Current_Win_Streak', 'Team_Current_Loss_Streak',
                    'Opp_Current_Win_Streak', 'Opp_Current_Loss_Streak',
                    'Team_Days_Rest', 'Opp_Days_Rest', 'Team_Is_BackToBack', 
-                   'Opp_Is_BackToBack', 'Team_Score', 'Opp_Score', 'Point_Diff', 'OT']
+                   'Opp_Is_BackToBack', 'Team_Score', 'Opp_Score', 'OT']
     cols_to_round = [col for col in numeric_cols if col not in integer_cols]
     df_final[cols_to_round] = df_final[cols_to_round].round(2)
     
