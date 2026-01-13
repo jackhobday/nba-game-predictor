@@ -42,6 +42,8 @@ env/
 data/
 data_enhanced/
 data_merged/
+# Exception: commit final dataset
+!data_merged/games_all_seasons.csv
 
 # Logs
 *.log
