@@ -83,47 +83,52 @@ def calculate_rolling_features(df):
     df['Is_BackToBack'] = (df['Days_Rest'] == 0).astype(int)
     
     # ===== SEASON-TO-DATE AVERAGES (Cumulative) =====
+    # Shift by 1 to exclude current game (prevent data leakage)
+    # First game will be NaN automatically from shift(1)
     for col in STAT_COLUMNS:
         if col in df.columns:
-            df[f'{col}_avg'] = df[col].expanding().mean()
+            df[f'{col}_avg'] = df[col].expanding().mean().shift(1)
     
     # Net Rating average
-    df['NetRtg_avg'] = df['NetRtg'].expanding().mean()
+    df['NetRtg_avg'] = df['NetRtg'].expanding().mean().shift(1)
     
     # Win percentage (season-to-date)
-    df['WinPct_avg'] = df['Result'].expanding().mean()
+    df['WinPct_avg'] = df['Result'].expanding().mean().shift(1)
     
     # Points scored/allowed averages
     # Note: CSV has two 'Opp' columns - 'Opp' is opponent abbreviation (string), 'Opp.1' is opponent score (numeric)
-    df['Tm_avg'] = df['Tm'].expanding().mean()
+    df['Tm_avg'] = df['Tm'].expanding().mean().shift(1)
     
     # Use 'Opp.1' for opponent score (pandas renames duplicate columns)
     opp_score_col = 'Opp.1' if 'Opp.1' in df.columns else None
     if opp_score_col and pd.api.types.is_numeric_dtype(df[opp_score_col]):
-        df['Opp_Score_avg'] = df[opp_score_col].expanding().mean()
-        df['Point_Diff_avg'] = (df['Tm'] - df[opp_score_col]).expanding().mean()
+        df['Opp_Score_avg'] = df[opp_score_col].expanding().mean().shift(1)
+        df['Point_Diff_avg'] = (df['Tm'] - df[opp_score_col]).expanding().mean().shift(1)
     else:
         # Fallback if column structure is different
         df['Opp_Score_avg'] = np.nan
         df['Point_Diff_avg'] = np.nan
     
     # ===== RECENT FORM (Last N Games) =====
+    # Shift by 1 to exclude current game (prevent data leakage)
+    # First game will be NaN automatically from shift(1)
     windows = [5, 10]
     for window in windows:
         for col in STAT_COLUMNS:
             if col in df.columns:
-                df[f'{col}_last{window}'] = df[col].rolling(window=window, min_periods=1).mean()
+                df[f'{col}_last{window}'] = df[col].rolling(window=window, min_periods=1).mean().shift(1)
         
-        df[f'NetRtg_last{window}'] = df['NetRtg'].rolling(window=window, min_periods=1).mean()
-        df[f'WinPct_last{window}'] = df['Result'].rolling(window=window, min_periods=1).mean()
+        df[f'NetRtg_last{window}'] = df['NetRtg'].rolling(window=window, min_periods=1).mean().shift(1)
+        df[f'WinPct_last{window}'] = df['Result'].rolling(window=window, min_periods=1).mean().shift(1)
         
         # Use 'Opp.1' for opponent score
         if opp_score_col and pd.api.types.is_numeric_dtype(df[opp_score_col]):
-            df[f'Point_Diff_last{window}'] = (df['Tm'] - df[opp_score_col]).rolling(window=window, min_periods=1).mean()
+            df[f'Point_Diff_last{window}'] = (df['Tm'] - df[opp_score_col]).rolling(window=window, min_periods=1).mean().shift(1)
         else:
             df[f'Point_Diff_last{window}'] = np.nan
     
     # ===== WIN/LOSS STREAKS =====
+    # Streaks should represent the state BEFORE the current game (prevent data leakage)
     df['Current_Win_Streak'] = 0
     df['Current_Loss_Streak'] = 0
     df['Longest_Win_Streak'] = 0
@@ -135,6 +140,13 @@ def calculate_rolling_features(df):
     longest_loss = 0
     
     for i in range(len(df)):
+        # Store streak BEFORE this game
+        df.loc[i, 'Current_Win_Streak'] = current_win
+        df.loc[i, 'Current_Loss_Streak'] = current_loss
+        df.loc[i, 'Longest_Win_Streak'] = longest_win
+        df.loc[i, 'Longest_Loss_Streak'] = longest_loss
+        
+        # Update streak AFTER storing (for next game)
         if df.loc[i, 'Result'] == 1:  # Win
             current_win += 1
             current_loss = 0
@@ -143,11 +155,6 @@ def calculate_rolling_features(df):
             current_loss += 1
             current_win = 0
             longest_loss = max(longest_loss, current_loss)
-        
-        df.loc[i, 'Current_Win_Streak'] = current_win
-        df.loc[i, 'Current_Loss_Streak'] = current_loss
-        df.loc[i, 'Longest_Win_Streak'] = longest_win
-        df.loc[i, 'Longest_Loss_Streak'] = longest_loss
     
     # ===== HOME/AWAY SPLITS =====
     # Home stats (cumulative)
@@ -167,6 +174,7 @@ def calculate_rolling_features(df):
     df['Away_Games'] = 0
     
     # Calculate cumulative home/away stats
+    # Store stats BEFORE current game to prevent data leakage
     home_wins = 0
     home_games = 0
     away_wins = 0
@@ -178,28 +186,37 @@ def calculate_rolling_features(df):
     away_drtg_sum = 0
     
     for i in range(len(df)):
+        # Store stats BEFORE this game
         if df.loc[i, 'Is_Home'] == 1:
+            df.loc[i, 'Home_Games'] = home_games
+            df.loc[i, 'Home_WinPct'] = home_wins / home_games if home_games > 0 else np.nan
+            df.loc[i, 'Home_ORtg_avg'] = home_ortg_sum / home_games if home_games > 0 else np.nan
+            df.loc[i, 'Home_DRtg_avg'] = home_drtg_sum / home_games if home_games > 0 else np.nan
+            if pd.notna(df.loc[i, 'Home_ORtg_avg']) and pd.notna(df.loc[i, 'Home_DRtg_avg']):
+                df.loc[i, 'Home_NetRtg_avg'] = df.loc[i, 'Home_ORtg_avg'] - df.loc[i, 'Home_DRtg_avg']
+            else:
+                df.loc[i, 'Home_NetRtg_avg'] = np.nan
+            
+            # Update AFTER storing (for next game)
             home_games += 1
             home_wins += df.loc[i, 'Result']
             home_ortg_sum += df.loc[i, 'ORtg']
             home_drtg_sum += df.loc[i, 'DRtg']
-            
-            df.loc[i, 'Home_Games'] = home_games
-            df.loc[i, 'Home_WinPct'] = home_wins / home_games if home_games > 0 else 0
-            df.loc[i, 'Home_ORtg_avg'] = home_ortg_sum / home_games if home_games > 0 else 0
-            df.loc[i, 'Home_DRtg_avg'] = home_drtg_sum / home_games if home_games > 0 else 0
-            df.loc[i, 'Home_NetRtg_avg'] = df.loc[i, 'Home_ORtg_avg'] - df.loc[i, 'Home_DRtg_avg']
         else:
+            df.loc[i, 'Away_Games'] = away_games
+            df.loc[i, 'Away_WinPct'] = away_wins / away_games if away_games > 0 else np.nan
+            df.loc[i, 'Away_ORtg_avg'] = away_ortg_sum / away_games if away_games > 0 else np.nan
+            df.loc[i, 'Away_DRtg_avg'] = away_drtg_sum / away_games if away_games > 0 else np.nan
+            if pd.notna(df.loc[i, 'Away_ORtg_avg']) and pd.notna(df.loc[i, 'Away_DRtg_avg']):
+                df.loc[i, 'Away_NetRtg_avg'] = df.loc[i, 'Away_ORtg_avg'] - df.loc[i, 'Away_DRtg_avg']
+            else:
+                df.loc[i, 'Away_NetRtg_avg'] = np.nan
+            
+            # Update AFTER storing (for next game)
             away_games += 1
             away_wins += df.loc[i, 'Result']
             away_ortg_sum += df.loc[i, 'ORtg']
             away_drtg_sum += df.loc[i, 'DRtg']
-            
-            df.loc[i, 'Away_Games'] = away_games
-            df.loc[i, 'Away_WinPct'] = away_wins / away_games if away_games > 0 else 0
-            df.loc[i, 'Away_ORtg_avg'] = away_ortg_sum / away_games if away_games > 0 else 0
-            df.loc[i, 'Away_DRtg_avg'] = away_drtg_sum / away_games if away_games > 0 else 0
-            df.loc[i, 'Away_NetRtg_avg'] = df.loc[i, 'Away_ORtg_avg'] - df.loc[i, 'Away_DRtg_avg']
     
     # Fill forward for games where split doesn't apply yet
     df['Home_ORtg_avg'] = df['Home_ORtg_avg'].ffill().fillna(0)
