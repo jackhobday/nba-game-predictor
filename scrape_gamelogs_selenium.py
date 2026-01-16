@@ -43,11 +43,17 @@ TEAM_NAME_MAPPING = {
 }
 
 SEASONS = {
+    '2025-26': '2026',
     '2024-25': '2025',
     '2023-24': '2024',
     '2022-23': '2023',
     '2021-22': '2022',
-    '2020-21': '2021'
+    '2020-21': '2021',
+    '2019-20': '2020',
+    '2018-19': '2019',
+    '2017-18': '2018',
+    '2016-17': '2017',
+    '2015-16': '2016',
 }
 
 BASE_URL = "https://www.basketball-reference.com/teams/{team}/{year}/gamelog-advanced/"
@@ -321,7 +327,7 @@ def save_to_csv(df: pd.DataFrame, team: str, season: str, data_dir: str = 'data'
         return False
 
 
-def scrape_all_teams(headless: bool = False, teams_to_scrape: Optional[list] = None):
+def scrape_all_teams(headless: bool = False, teams_to_scrape: Optional[list] = None, seasons_to_scrape: Optional[list] = None):
     """
     Main function to scrape game logs for all teams and seasons using Selenium.
     
@@ -329,11 +335,18 @@ def scrape_all_teams(headless: bool = False, teams_to_scrape: Optional[list] = N
         headless: If True, run browser in headless mode (no visible window)
         teams_to_scrape: Optional list of team abbreviations to scrape. If None, scrapes all teams.
                         Use Basketball-Reference abbreviations (BRK, CHO, PHO for Brooklyn, Charlotte, Phoenix)
+        seasons_to_scrape: Optional list of seasons to scrape (e.g., ['2015-16', '2016-17']). 
+                          If None, scrapes all seasons in SEASONS dict.
     """
     # Use specified teams or all teams
     teams = teams_to_scrape if teams_to_scrape else TEAMS
     
-    total_teams = len(teams) * len(SEASONS)
+    # Use specified seasons or all seasons
+    seasons = seasons_to_scrape if seasons_to_scrape else list(SEASONS.keys())
+    # Filter SEASONS dict to only include requested seasons
+    seasons_dict = {season: SEASONS[season] for season in seasons if season in SEASONS}
+    
+    total_teams = len(teams) * len(seasons_dict)
     successful = 0
     failed = 0
     current = 0
@@ -342,14 +355,16 @@ def scrape_all_teams(headless: bool = False, teams_to_scrape: Optional[list] = N
     print(f"  NBA GAME LOGS SCRAPER - Selenium Version")
     print("="*70)
     if teams_to_scrape:
-        print(f"Teams: {len(teams)} (specific: {', '.join(teams)}) | Seasons: {len(SEASONS)} | Total files: {total_teams}")
+        print(f"Teams: {len(teams)} (specific: {', '.join(teams)}) | Seasons: {len(seasons_dict)} | Total files: {total_teams}")
     else:
-        print(f"Teams: {len(teams)} | Seasons: {len(SEASONS)} | Total files: {total_teams}")
+        print(f"Teams: {len(teams)} | Seasons: {len(seasons_dict)} | Total files: {total_teams}")
+    if seasons_to_scrape:
+        print(f"Seasons: {', '.join(sorted(seasons_dict.keys()))}")
     print(f"Estimated time: ~{(total_teams * (PAGE_LOAD_WAIT + REQUEST_DELAY) / 60):.1f} minutes")
     print(f"Browser mode: {'Headless' if headless else 'Visible'}")
     print("="*70 + "\n")
     
-    logger.info(f"Starting Selenium scrape for {len(teams)} teams across {len(SEASONS)} seasons")
+    logger.info(f"Starting Selenium scrape for {len(teams)} teams across {len(seasons_dict)} seasons")
     logger.info(f"Total files to process: {total_teams}")
     
     # Set up Chrome driver
@@ -363,7 +378,7 @@ def scrape_all_teams(headless: bool = False, teams_to_scrape: Optional[list] = N
         return
     
     try:
-        for season, year in SEASONS.items():
+        for season, year in seasons_dict.items():
             print(f"\n📅 SEASON: {season} (Basketball-Reference year: {year})")
             print("-" * 70)
             
@@ -445,11 +460,44 @@ if __name__ == "__main__":
     # Check for --headless flag
     headless_mode = "--headless" in sys.argv
     
-    # Parse team arguments (everything that's not a flag)
+    # Check for --seasons flag
+    seasons_to_scrape = None
+    if "--seasons" in sys.argv:
+        seasons_idx = sys.argv.index("--seasons")
+        if seasons_idx + 1 < len(sys.argv):
+            seasons_arg = sys.argv[seasons_idx + 1]
+            # Parse seasons (comma-separated or space-separated)
+            seasons_list = [s.strip() for s in seasons_arg.replace(',', ' ').split()]
+            # Validate seasons
+            valid_seasons = []
+            for season in seasons_list:
+                if season in SEASONS:
+                    valid_seasons.append(season)
+                else:
+                    print(f"⚠️  Warning: '{season}' is not a valid season. Skipping.")
+                    print(f"   Valid seasons: {', '.join(sorted(SEASONS.keys()))}")
+            if valid_seasons:
+                seasons_to_scrape = valid_seasons
+                print(f"\n📋 Scraping specific seasons: {', '.join(sorted(seasons_to_scrape))}\n")
+    
+    # Parse team arguments (everything that's not a flag or flag value)
     teams_to_scrape = None
     if len(sys.argv) > 1:
-        # Get all arguments that aren't flags
-        team_args = [arg for arg in sys.argv[1:] if not arg.startswith('--')]
+        # Get all arguments that aren't flags or flag values
+        skip_next = False
+        team_args = []
+        for i, arg in enumerate(sys.argv[1:], 1):
+            if skip_next:
+                skip_next = False
+                continue
+            if arg == "--headless":
+                continue
+            elif arg == "--seasons":
+                skip_next = True
+                continue
+            elif not arg.startswith('--'):
+                team_args.append(arg)
+        
         if team_args:
             # Validate teams
             valid_teams = []
@@ -463,11 +511,12 @@ if __name__ == "__main__":
                 teams_to_scrape = valid_teams
                 print(f"\n📋 Scraping specific teams: {', '.join(teams_to_scrape)}\n")
     
-    if not headless_mode and not teams_to_scrape:
+    if not headless_mode and not teams_to_scrape and not seasons_to_scrape:
         print("\n💡 TIPS:")
         print("   - Run with --headless flag to hide the browser window")
+        print("   - Specify seasons: python scrape_gamelogs_selenium.py --seasons '2015-16 2016-17 2017-18 2018-19 2019-20'")
         print("   - Specify teams: python scrape_gamelogs_selenium.py BRK CHO PHO")
-        print("   - Combine: python scrape_gamelogs_selenium.py --headless BRK CHO PHO\n")
+        print("   - Combine: python scrape_gamelogs_selenium.py --headless --seasons '2015-16 2016-17' BRK CHO\n")
     
-    scrape_all_teams(headless=headless_mode, teams_to_scrape=teams_to_scrape)
+    scrape_all_teams(headless=headless_mode, teams_to_scrape=teams_to_scrape, seasons_to_scrape=seasons_to_scrape)
 
