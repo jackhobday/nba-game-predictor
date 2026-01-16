@@ -17,11 +17,17 @@ DATA_DIR = 'data'
 
 # Expected row counts (including header)
 EXPECTED_ROWS = {
+    '2025-26': 83,  # 1 header + 82 games
     '2024-25': 83,  # 1 header + 82 games
     '2023-24': 83,  # 1 header + 82 games
     '2022-23': 83,  # 1 header + 82 games
     '2021-22': 83,  # 1 header + 82 games
     '2020-21': 73,  # 1 header + 72 games (shortened season)
+    '2019-20': 73,  # 1 header + 72 games (shortened season - COVID)
+    '2018-19': 83,  # 1 header + 82 games
+    '2017-18': 83,  # 1 header + 82 games
+    '2016-17': 83,  # 1 header + 82 games
+    '2015-16': 83,  # 1 header + 82 games
 }
 
 # Header row pattern (first few columns that identify a header row)

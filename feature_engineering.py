@@ -97,15 +97,21 @@ def calculate_rolling_features(df):
     
     # Points scored/allowed averages
     # Note: CSV has two 'Opp' columns - 'Opp' is opponent abbreviation (string), 'Opp.1' is opponent score (numeric)
-    df['Tm_avg'] = df['Tm'].expanding().mean().shift(1)
+    # Points scored (season-to-date)
+    df['Points_For_avg'] = df['Tm'].expanding().mean().shift(1)
+    df['Tm_avg'] = df['Points_For_avg']  # Keep for backward compatibility
     
     # Use 'Opp.1' for opponent score (pandas renames duplicate columns)
     opp_score_col = 'Opp.1' if 'Opp.1' in df.columns else None
     if opp_score_col and pd.api.types.is_numeric_dtype(df[opp_score_col]):
-        df['Opp_Score_avg'] = df[opp_score_col].expanding().mean().shift(1)
+        # Points allowed (season-to-date)
+        df['Points_Against_avg'] = df[opp_score_col].expanding().mean().shift(1)
+        df['Opp_Score_avg'] = df['Points_Against_avg']  # Keep for backward compatibility
+        # Point differential (season-to-date)
         df['Point_Diff_avg'] = (df['Tm'] - df[opp_score_col]).expanding().mean().shift(1)
     else:
         # Fallback if column structure is different
+        df['Points_Against_avg'] = np.nan
         df['Opp_Score_avg'] = np.nan
         df['Point_Diff_avg'] = np.nan
     
@@ -121,7 +127,7 @@ def calculate_rolling_features(df):
         df[f'NetRtg_last{window}'] = df['NetRtg'].rolling(window=window, min_periods=1).mean().shift(1)
         df[f'WinPct_last{window}'] = df['Result'].rolling(window=window, min_periods=1).mean().shift(1)
         
-        # Use 'Opp.1' for opponent score
+        # Use 'Opp.1' for opponent score (keep Point_Diff for backward compatibility)
         if opp_score_col and pd.api.types.is_numeric_dtype(df[opp_score_col]):
             df[f'Point_Diff_last{window}'] = (df['Tm'] - df[opp_score_col]).rolling(window=window, min_periods=1).mean().shift(1)
         else:
