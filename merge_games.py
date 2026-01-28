@@ -3,7 +3,7 @@
 Merge Team Game Logs into Game-Level Dataset
 
 Matches team game logs to create game-level rows with both teams' features,
-differential features, and target variable (winner).
+differential features, odds-based features, and target variable (winner).
 """
 
 import os
@@ -14,6 +14,7 @@ from pathlib import Path
 # Directories
 ENHANCED_DIR = 'data_enhanced'
 OUTPUT_DIR = 'data_merged'
+ODDS_FILE = 'odds_data/odds_processed.csv'
 
 # Team name mapping (Basketball-Reference to standard)
 TEAM_MAPPING = {
@@ -24,6 +25,99 @@ TEAM_MAPPING = {
 
 # Reverse mapping (standard to Basketball-Reference)
 REVERSE_TEAM_MAPPING = {v: k for k, v in TEAM_MAPPING.items()}
+
+# Global odds data (loaded once)
+ODDS_DATA = None
+
+
+def load_odds_data():
+    """
+    Load processed odds data from file.
+    
+    Returns:
+        DataFrame with odds data, or None if not available
+    """
+    global ODDS_DATA
+    
+    if ODDS_DATA is not None:
+        return ODDS_DATA
+    
+    if not os.path.exists(ODDS_FILE):
+        print(f"  ⚠️  Odds file not found: {ODDS_FILE}")
+        print(f"      Run process_odds.py first to generate it.")
+        return None
+    
+    try:
+        ODDS_DATA = pd.read_csv(ODDS_FILE)
+        ODDS_DATA['Date'] = pd.to_datetime(ODDS_DATA['Date'])
+        print(f"  📊 Loaded odds data: {len(ODDS_DATA)} games")
+        return ODDS_DATA
+    except Exception as e:
+        print(f"  ⚠️  Error loading odds data: {e}")
+        return None
+
+
+def get_odds_for_game(odds_df, date, team, opponent, is_home):
+    """
+    Look up odds for a specific game.
+    
+    Args:
+        odds_df: DataFrame with odds data
+        date: Game date
+        team: Team abbreviation (standardized)
+        opponent: Opponent abbreviation (standardized)
+        is_home: 1 if team is home, 0 if away
+    
+    Returns:
+        Dictionary with odds features, or empty dict if not found
+    """
+    if odds_df is None:
+        return {}
+    
+    # Determine home/away teams based on is_home flag
+    if is_home == 1:
+        home_team, away_team = team, opponent
+    else:
+        home_team, away_team = opponent, team
+    
+    # Look up the game
+    mask = (
+        (odds_df['Date'] == date) & 
+        (odds_df['Home_Team'] == home_team) & 
+        (odds_df['Away_Team'] == away_team)
+    )
+    
+    matches = odds_df[mask]
+    
+    if len(matches) == 0:
+        return {}
+    
+    row = matches.iloc[0]
+    
+    # Create odds features from team's perspective
+    if is_home == 1:
+        team_ml = row['Home_ML']
+        opp_ml = row['Away_ML']
+        team_win_prob = row['Home_Win_Prob']
+        opp_win_prob = row['Away_Win_Prob']
+        spread = row['Spread']  # Home team spread
+    else:
+        team_ml = row['Away_ML']
+        opp_ml = row['Home_ML']
+        team_win_prob = row['Away_Win_Prob']
+        opp_win_prob = row['Home_Win_Prob']
+        spread = -row['Spread']  # Flip spread for away team
+    
+    return {
+        'Team_ML': team_ml,
+        'Opp_ML': opp_ml,
+        'Team_Win_Prob_Market': team_win_prob,
+        'Opp_Win_Prob_Market': opp_win_prob,
+        'Win_Prob_Diff_Market': team_win_prob - opp_win_prob,
+        'Spread': spread,
+        'Total': row['Total'],
+        'Has_Odds': 1
+    }
 
 
 def normalize_team_name(team, to_standard=True):
@@ -137,12 +231,13 @@ def create_differential_features(team_row, opp_row):
     return diffs
 
 
-def merge_season_games(season):
+def merge_season_games(season, odds_df=None):
     """
     Merge all games for a single season.
     
     Args:
         season: Season string (e.g., '2024-25')
+        odds_df: Optional DataFrame with odds data
         
     Returns:
         DataFrame with merged games
@@ -160,6 +255,7 @@ def merge_season_games(season):
     games_processed = 0
     games_matched = 0
     games_failed = 0
+    games_with_odds = 0
     
     # Process each team's games
     for team, team_df in team_logs.items():
@@ -286,6 +382,24 @@ def merge_season_games(season):
             diffs = create_differential_features(team_row, opp_row)
             game_row.update(diffs)
             
+            # Add odds features
+            odds_features = get_odds_for_game(
+                odds_df, date, team_standard, opp_standard, team_row['Is_Home']
+            )
+            if odds_features:
+                game_row.update(odds_features)
+                games_with_odds += 1
+            else:
+                # Add empty odds features
+                game_row['Team_ML'] = np.nan
+                game_row['Opp_ML'] = np.nan
+                game_row['Team_Win_Prob_Market'] = np.nan
+                game_row['Opp_Win_Prob_Market'] = np.nan
+                game_row['Win_Prob_Diff_Market'] = np.nan
+                game_row['Spread'] = np.nan
+                game_row['Total'] = np.nan
+                game_row['Has_Odds'] = 0
+            
             merged_games.append(game_row)
     
     if not merged_games:
@@ -297,6 +411,7 @@ def merge_season_games(season):
     print(f"  ✓ Processed {games_processed} team-game rows")
     print(f"  ✓ Matched {games_matched} games")
     print(f"  ✗ Failed to match {games_failed} games")
+    print(f"  📊 Games with odds: {games_with_odds}/{len(df_merged)}")
     print(f"  → Created {len(df_merged)} game-level rows")
     
     return df_merged
@@ -322,10 +437,13 @@ def merge_all_seasons():
         print("❌ No seasons found in enhanced data directory")
         return
     
+    # Load odds data once
+    odds_df = load_odds_data()
+    
     all_games = []
     
     for season in seasons:
-        df_season = merge_season_games(season)
+        df_season = merge_season_games(season, odds_df)
         if df_season is not None and len(df_season) > 0:
             all_games.append(df_season)
         print()
@@ -385,7 +503,18 @@ def merge_all_seasons():
     print(f"  - Team features: {len([c for c in df_final.columns if c.startswith('Team_')])}")
     print(f"  - Opponent features: {len([c for c in df_final.columns if c.startswith('Opp_')])}")
     print(f"  - Differential features: {len([c for c in df_final.columns if 'Diff' in c or 'Advantage' in c])}")
+    print(f"  - Odds features: {len([c for c in df_final.columns if c in ['Team_ML', 'Opp_ML', 'Team_Win_Prob_Market', 'Opp_Win_Prob_Market', 'Win_Prob_Diff_Market', 'Spread', 'Total', 'Has_Odds']])}")
     print(f"  - Target variable: Result (1 = Team wins, 0 = Opponent wins)")
+    
+    # Odds coverage summary
+    if 'Has_Odds' in df_final.columns:
+        total_with_odds = df_final['Has_Odds'].sum()
+        print(f"\n📈 Odds Coverage: {total_with_odds}/{len(df_final)} games ({100*total_with_odds/len(df_final):.1f}%)")
+        for season in seasons:
+            season_df = df_final[df_final['Season'] == season]
+            if len(season_df) > 0:
+                with_odds = season_df['Has_Odds'].sum()
+                print(f"  {season}: {with_odds}/{len(season_df)} games ({100*with_odds/len(season_df):.1f}%)")
     print()
 
 
