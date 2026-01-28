@@ -479,9 +479,18 @@ def merge_all_seasons():
             df_season.to_csv(output_path, index=False)
             print(f"💾 Saved {len(df_season)} games to games_{season}.csv")
     
-    # Save combined file
+    # Define odds columns
+    odds_cols = ['Team_ML', 'Opp_ML', 'Team_Win_Prob_Market', 'Opp_Win_Prob_Market', 
+                 'Win_Prob_Diff_Market', 'Spread', 'Total', 'Has_Odds']
+    
+    # Save combined file WITHOUT odds (for main notebook models)
+    df_no_odds = df_final.drop(columns=[c for c in odds_cols if c in df_final.columns])
     output_path = os.path.join(OUTPUT_DIR, "games_all_seasons.csv")
-    df_final.to_csv(output_path, index=False)
+    df_no_odds.to_csv(output_path, index=False)
+    
+    # Save combined file WITH odds (for bonus section)
+    output_path_odds = os.path.join(OUTPUT_DIR, "games_all_seasons_odds.csv")
+    df_final.to_csv(output_path_odds, index=False)
     
     # Summary
     print("\n" + "="*70)
@@ -490,7 +499,8 @@ def merge_all_seasons():
     print(f"Total games: {len(df_final)}")
     print(f"Seasons: {len(seasons)}")
     print(f"\nFiles saved to: {OUTPUT_DIR}/")
-    print(f"  - games_all_seasons.csv ({len(df_final)} games)")
+    print(f"  - games_all_seasons.csv ({len(df_no_odds)} games, {len(df_no_odds.columns)} features - no odds)")
+    print(f"  - games_all_seasons_odds.csv ({len(df_final)} games, {len(df_final.columns)} features - with odds)")
     for season in seasons:
         count = len(df_final[df_final['Season'] == season])
         if count > 0:
